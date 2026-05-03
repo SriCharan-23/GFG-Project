@@ -6,7 +6,7 @@ A modern, full-stack **Book Store Web Application** built using **FastAPI**, fea
 
 ## 🚀 Live Demo
 
-🔗 *(Add your Cloud Run URL here)*
+🔗 *https://bookstore-app-768123148807.asia-south1.run.app/*
 
 ---
 
