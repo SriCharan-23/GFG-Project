@@ -4,6 +4,7 @@ Serves HTML pages via Jinja2 and provides JSON API endpoints.
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends, Query
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -19,13 +20,23 @@ from seed_data import seed_database
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("bookstore")
 
+# ── Base directory (FIX for Cloud Run) ──
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ── Lifespan: seed database on startup ──
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Create tables and seed data on startup."""
     Base.metadata.create_all(bind=engine)
-    seed_database()
+
+    # Prevent duplicate seeding
+    try:
+        db = next(get_db())
+        if not db.query(Book).first():
+            seed_database()
+    except Exception as e:
+        logger.error(f"Seeding error: {e}")
+
     logger.info("[READY] Book E-Commerce server is ready!")
     yield
 
@@ -38,9 +49,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── Static files & templates ──
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+# ── Static files & templates (FIXED PATHS) ──
+app.mount(
+    "/static",
+    StaticFiles(directory=os.path.join(BASE_DIR, "static")),
+    name="static"
+)
+
+templates = Jinja2Templates(
+    directory=os.path.join(BASE_DIR, "templates")
+)
 
 
 # ═══════════════════════════════════════════════════
@@ -49,7 +67,6 @@ templates = Jinja2Templates(directory="templates")
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    """Render the Home / Shop page."""
     return templates.TemplateResponse("index.html", {
         "request": request,
         "page_title": "Shop Our Collection",
@@ -58,7 +75,6 @@ async def home(request: Request):
 
 @app.get("/about", response_class=HTMLResponse)
 async def about(request: Request):
-    """Render the About page."""
     return templates.TemplateResponse("about.html", {
         "request": request,
         "page_title": "About Us",
@@ -67,7 +83,6 @@ async def about(request: Request):
 
 @app.get("/contact", response_class=HTMLResponse)
 async def contact(request: Request):
-    """Render the Contact Us page."""
     return templates.TemplateResponse("contact.html", {
         "request": request,
         "page_title": "Contact Us",
@@ -83,10 +98,6 @@ async def get_books(
     category: str = Query(None, description="Filter by category"),
     db: Session = Depends(get_db),
 ):
-    """
-    Fetch all books as JSON.
-    Optional query param: ?category=Business
-    """
     query = db.query(Book)
     if category:
         query = query.filter(Book.category == category)
@@ -96,10 +107,6 @@ async def get_books(
 
 @app.post("/api/contact")
 async def submit_contact(request: Request):
-    """
-    Handle contact form submissions.
-    Logs the submission and returns a success response.
-    """
     try:
         form_data = await request.json()
         name = form_data.get("name", "Unknown")
@@ -130,12 +137,20 @@ async def submit_contact(request: Request):
 
 
 # ═══════════════════════════════════════════════════
+# HEALTH CHECK (NEW - useful for Cloud Run)
+# ═══════════════════════════════════════════════════
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+# ═══════════════════════════════════════════════════
 # RUN SERVER
 # ═══════════════════════════════════════════════════
 
 if __name__ == "__main__":
     import uvicorn
-    import os
 
     port = int(os.environ.get("PORT", 8080))
     uvicorn.run("main:app", host="0.0.0.0", port=port)
